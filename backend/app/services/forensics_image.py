@@ -17,6 +17,11 @@ Image Forensics — البند 7 من المواصفات.
    الصور الملتقطة بكاميرا حقيقية عادة لها نمط ضوضاء متجانس نسبيًا ناتج عن الحساس (sensor noise).
    تفاوت حاد بين المناطق قد يشير إلى دمج مصادر مختلفة، أو لصورة مولّدة بالكامل بالذكاء الاصطناعي
    (التي أحيانًا تفتقر لنمط ضوضاء الحساس الطبيعي أو تُظهر نمطًا اصطناعيًا موحدًا جدًا).
+
+ملاحظة أداء مهمة (خطط استضافة بذاكرة محدودة، مثل Render Free 512MB):
+كل الدوال هنا تُصغّر الصورة تلقائيًا إلى حد أقصى معقول قبل التحليل عبر
+_load_and_downscale — تحليل ELA/Noise لا يحتاج دقة الصورة الأصلية الكاملة
+ليعطي إشارة موثوقة، وتصغيرها يقلل استهلاك الذاكرة بعشرات المرات لصور عالية الدقة.
 """
 import io
 import numpy as np
@@ -24,11 +29,23 @@ import cv2
 from PIL import Image
 from typing import Any
 
+MAX_DIMENSION = 1600  # أقصى بُعد (طول أو عرض) بالبكسل قبل التحليل الفني
+
+
+def _load_and_downscale(file_path: str) -> Image.Image:
+    """يفتح الصورة ويصغّرها إن لزم — يمنع استهلاك ذاكرة زائد على صور عالية الدقة."""
+    img = Image.open(file_path).convert("RGB")
+    if max(img.size) > MAX_DIMENSION:
+        ratio = MAX_DIMENSION / max(img.size)
+        new_size = (int(img.width * ratio), int(img.height * ratio))
+        img = img.resize(new_size, Image.LANCZOS)
+    return img
+
 
 def error_level_analysis(file_path: str, quality: int = 90) -> dict[str, Any]:
     result: dict[str, Any] = {"available": False}
     try:
-        original = Image.open(file_path).convert("RGB")
+        original = _load_and_downscale(file_path)
 
         buffer = io.BytesIO()
         original.save(buffer, format="JPEG", quality=quality)
@@ -49,8 +66,6 @@ def error_level_analysis(file_path: str, quality: int = 90) -> dict[str, Any]:
         max_error = float(np.max(ela_gray))
         std_error = float(np.std(ela_gray))
 
-        # نقسّم الصورة إلى مربعات (blocks) ونحسب متوسط الخطأ بكل منها
-        # لرصد وجود منطقة "شاذة" واضحة (تدل على تعديل موضعي) لا مجرد ضوضاء عامة
         h, w = ela_gray.shape
         block_size = max(16, min(h, w) // 8)
         block_means = []
@@ -86,7 +101,11 @@ def noise_consistency_analysis(file_path: str) -> dict[str, Any]:
             result["error"] = "تعذّر فتح الصورة عبر OpenCV"
             return result
 
-        # مرشّح تمرير عالٍ بسيط: الصورة - نسخة مموّهة منها = بقايا الضوضاء عالية التردد
+        h0, w0 = img.shape
+        if max(h0, w0) > MAX_DIMENSION:
+            ratio = MAX_DIMENSION / max(h0, w0)
+            img = cv2.resize(img, (int(w0 * ratio), int(h0 * ratio)), interpolation=cv2.INTER_AREA)
+
         blurred = cv2.GaussianBlur(img, (5, 5), 0)
         noise_residual = cv2.absdiff(img, blurred)
 
@@ -105,12 +124,8 @@ def noise_consistency_analysis(file_path: str) -> dict[str, Any]:
         variances = np.array(block_variances)
         mean_var = float(np.mean(variances))
         std_var = float(np.std(variances))
-        # معامل التباين (Coefficient of Variation): كل ما زاد، زاد تفاوت نمط الضوضاء بين المناطق
         cv_ratio = float(std_var / mean_var) if mean_var > 1e-6 else 0.0
 
-        # إشارة إضافية أهم من CV وحدها: نسبة المناطق "الملساء بشكل غير طبيعي"
-        # (تباين ضوضاء قريب من الصفر) بينما باقي الصورة فيها ضوضاء حساس طبيعية.
-        # هذا نمط شائع جدًا في: لصق منطقة من مصدر آخر، أو تنعيم مفتعل، أو أجزاء مولّدة بالذكاء الاصطناعي.
         low_variance_threshold = max(mean_var * 0.15, 1.0)
         flat_block_ratio = float(np.mean(variances < low_variance_threshold)) if mean_var > 3.0 else 0.0
 
