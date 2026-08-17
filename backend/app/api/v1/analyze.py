@@ -2,9 +2,10 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 
 from app.core.config import get_settings
+from app.core.limiter import limiter
 from app.services.analyze_image import analyze_image
 from app.services.analyze_document import analyze_document
 
@@ -24,7 +25,8 @@ def _save_upload(upload: UploadFile) -> str:
 
 
 @router.post("/image")
-async def analyze_image_endpoint(file: UploadFile = File(...)):
+@limiter.limit("5/day")
+async def analyze_image_endpoint(request: Request, file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower()
     if ext not in settings.ALLOWED_IMAGE_EXT:
         raise HTTPException(400, detail=f"صيغة غير مدعومة للصور: {ext}")
@@ -39,7 +41,8 @@ async def analyze_image_endpoint(file: UploadFile = File(...)):
 
 
 @router.post("/document")
-async def analyze_document_endpoint(file: UploadFile = File(...)):
+@limiter.limit("5/day")
+async def analyze_document_endpoint(request: Request, file: UploadFile = File(...)):
     ext = Path(file.filename).suffix.lower()
     if ext not in settings.ALLOWED_DOC_EXT:
         raise HTTPException(400, detail=f"صيغة غير مدعومة للمستندات: {ext}")
