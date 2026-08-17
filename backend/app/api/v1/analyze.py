@@ -33,7 +33,7 @@ async def analyze_image_endpoint(request: Request, file: UploadFile = File(...))
 
     path = _save_upload(file)
     try:
-        report = analyze_image(path)
+        report = await analyze_image(path)
         return report.to_dict()
     finally:
         if settings.DELETE_FILE_AFTER_ANALYSIS_DEFAULT and os.path.exists(path):

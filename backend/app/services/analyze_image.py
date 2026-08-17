@@ -1,16 +1,15 @@
 """
-يُنفّذ Pipeline الصورة للمرحلة 1:
-Hash -> Metadata/EXIF -> Consistency check -> Evidence Report
-(طبقات C2PA / AI-signals / Source Evidence تُضاف لاحقًا كخدمات منفصلة
- وتُدمج هنا فقط عبر إضافة EvidenceItem جديد — الهيكل مصمم للتوسّع)
+يُنفّذ Pipeline الصورة الكامل:
+Hash -> Metadata/EXIF -> Forensics (محلي) -> AI Detection (Hive API) -> Evidence Report
 """
 from app.services.hashing import compute_sha256
 from app.services.metadata_image import extract_image_metadata, assess_metadata_consistency
 from app.services.forensics_image import error_level_analysis, noise_consistency_analysis, assess_forensic_signals
+from app.services.hive_client import check_ai_generated
 from app.services.evidence_engine import EvidenceReport, EvidenceItem, EvidenceLevel
 
 
-def analyze_image(file_path: str) -> EvidenceReport:
+async def analyze_image(file_path: str) -> EvidenceReport:
     file_hash = compute_sha256(file_path)
 
     metadata = extract_image_metadata(file_path)
@@ -18,7 +17,6 @@ def analyze_image(file_path: str) -> EvidenceReport:
 
     items: list[EvidenceItem] = []
 
-    # عنصر: Metadata
     if consistency["status"] == "suspicious":
         level = EvidenceLevel.CONFLICT
         summary = "تم رصد إشارة تعارض في بيانات EXIF تستحق المراجعة."
@@ -37,7 +35,6 @@ def analyze_image(file_path: str) -> EvidenceReport:
         details={"metadata": metadata, "flags": consistency["flags"]},
     ))
 
-    # عنصر: Technical Forensics (ELA + Noise consistency) — تحليل حقيقي على بكسلات الصورة
     ela = error_level_analysis(file_path)
     noise = noise_consistency_analysis(file_path)
     forensic_assessment = assess_forensic_signals(ela, noise)
@@ -48,8 +45,8 @@ def analyze_image(file_path: str) -> EvidenceReport:
         "high": EvidenceLevel.CONFLICT,
     }
     forensic_summary_map = {
-        "low": "لا توجد إشارات تلاعب واضحة في التحليل الفني الأولي (ELA + نمط الضوضاء).",
-        "moderate": "توجد إشارة فنية واحدة تستحق مراجعة — ليست دليلاً قاطعًا على التعديل.",
+        "low": "لا توجد إشارات تلاعب موضعي واضحة في التحليل الفني.",
+        "moderate": "توجد إشارة فنية واحدة تستحق مراجعة — ليست دليلاً قاطعًا.",
         "high": "توجد أكثر من إشارة فنية متقاربة تستدعي مراجعة يدوية دقيقة.",
     }
 
@@ -62,11 +59,43 @@ def analyze_image(file_path: str) -> EvidenceReport:
             "error_level_analysis": ela,
             "noise_consistency": noise,
             "flags": forensic_assessment["flags"],
-            "note": "يعتمد الآن على التجمّع المكاني للبقع المشبوهة (لا نسبة عامة) لتقليل false positives على صور تحتوي أكثر من نسيج طبيعي. ما زال heuristic يحتاج معايرة.",
+            "note": "يكشف تلاعبًا موضعيًا (لصق/تركيب) — مو توليد AI كامل، والذي تكشفه طبقة AI Analysis المنفصلة.",
         },
     ))
 
-    # عنصر: Provenance (C2PA) — سيُستبدل بفحص حقيقي في خطوة لاحقة، الآن NA/placeholder صريح
+    hive_result = await check_ai_generated(file_path)
+
+    if hive_result.get("available"):
+        ai_score = hive_result["ai_generated_score"]
+        if ai_score >= 0.65:
+            ai_level = EvidenceLevel.CONFLICT
+            ai_summary = f"احتمال توليد بالذكاء الاصطناعي مرتفع ({round(ai_score*100,1)}%)."
+        elif ai_score >= 0.35:
+            ai_level = EvidenceLevel.MINOR
+            ai_summary = f"نتيجة غير حاسمة ({round(ai_score*100,1)}% احتمال توليد AI) — تحتاج مراجعة."
+        else:
+            ai_level = EvidenceLevel.GOOD
+            ai_summary = f"لا توجد إشارات قوية على التوليد بالذكاء الاصطناعي ({round(ai_score*100,1)}%)."
+
+        if hive_result.get("likely_source"):
+            ai_summary += f" المصدر المرجَّح: {hive_result['likely_source']}."
+
+        items.append(EvidenceItem(
+            key="ai_analysis",
+            label_ar="تحليل الذكاء الاصطناعي (AI Analysis)",
+            level=ai_level,
+            summary_ar=ai_summary,
+            details=hive_result,
+        ))
+    else:
+        items.append(EvidenceItem(
+            key="ai_analysis",
+            label_ar="تحليل الذكاء الاصطناعي (AI Analysis)",
+            level=EvidenceLevel.NA,
+            summary_ar="تعذّر تنفيذ الفحص عبر Hive API في هذه اللحظة.",
+            details=hive_result,
+        ))
+
     items.append(EvidenceItem(
         key="provenance",
         label_ar="مصدر المحتوى (C2PA / Content Credentials)",
