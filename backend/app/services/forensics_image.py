@@ -1,45 +1,89 @@
 """
-Image Forensics — البند 7 من المواصفات.
-هذه أول طبقة تحليل لا تعتمد على بيانات يمكن حذفها بسهولة (مثل EXIF)،
-بل على خصائص فيزيائية للصورة نفسها بعد الضغط والالتقاط.
+Image Forensics — البند 7 من المواصفات (نسخة v2 — مبنية على التجمّع المكاني).
 
-نبني هنا إشارتين حقيقيتين وقابلتين للتفسير:
+## لماذا أُعيد بناء هذا الملف
+النسخة الأولى قارنت كل "مربع" (block) بمتوسط الصورة كاملة. هذا يُنتج
+false positives كثيرة على صور حقيقية تحتوي طبيعيًا أكثر من نسيج واحد
+(مثال حقيقي واجهناه: صورة شخص يحمل بطاقة هوية — البطاقة سطح بلاستيكي
+أملس، والجلد/الشعر سطح ذو نسيج طبيعي؛ الفرق بينهما طبيعي 100% وليس دليل تلاعب).
 
-1) Error Level Analysis (ELA):
-   نعيد حفظ الصورة بجودة JPEG معروفة (90) ونقارنها بالأصل.
-   المناطق التي "أُعيد ضغطها" بمستوى مختلف عن باقي الصورة (نتيجة تعديل موضعي:
-   لصق، طمس، تركيب) تُظهر مستوى خطأ مختلفًا عن محيطها.
-   هذا أسلوب معروف في الطب الشرعي الرقمي (Digital Image Forensics) — إشارة، وليست إثباتًا.
+## المبدأ العلمي الأصح (مستخدم فعليًا بأدبيات Digital Image Forensics)
+التلاعب الحقيقي (لصق/تركيب منطقة من مصدر آخر) يترك بقعة واحدة متجمّعة
+ومتلاصقة (spatially contiguous) ذات خصائص مختلفة عن محيطها المباشر.
+اختلاف نسيج طبيعي بين جسمين مختلفين بالصورة (بطاقة + يد، سماء + مبنى)
+لا يُنتج هذا النمط تحديدًا — كل منطقة متسقة داخليًا مع نفسها بس مختلفة
+عن المنطقة الثانية بشكل واسع ومتوقّع منطقيًا من محتوى الصورة نفسه.
 
-2) Noise Consistency:
-   نحسب بقايا الضوضاء (noise residual) عبر مرشّح تمرير عالٍ (High-pass filter)
-   ثم نقيس تباين شدة الضوضاء بين مناطق الصورة (Blocks).
-   الصور الملتقطة بكاميرا حقيقية عادة لها نمط ضوضاء متجانس نسبيًا ناتج عن الحساس (sensor noise).
-   تفاوت حاد بين المناطق قد يشير إلى دمج مصادر مختلفة، أو لصورة مولّدة بالكامل بالذكاء الاصطناعي
-   (التي أحيانًا تفتقر لنمط ضوضاء الحساس الطبيعي أو تُظهر نمطًا اصطناعيًا موحدًا جدًا).
+لذلك النسخة الجديدة لا تكتفي بـ"نسبة المربعات الشاذة"، بل تتحقق:
+1. هل هذي المربعات الشاذة متجاورة فعليًا (تكوّن مكوّن متصل واحد)؟
+2. هل حجم هذا المكوّن معقول لبقعة تلاعب (مو صغير جدًا = ضوضاء عشوائية،
+   ومو كبير جدًا = على الأغلب نسيج طبيعي واسع مثل خلفية أو جسم كامل)؟
+3. هل هذا المكوّن داخلي (لا يلامس حواف الصورة بشكل كامل) — لصقات
+   التلاعب غالبًا داخل الصورة، بينما جسم طبيعي كامل (كخلفية) يلامس الحواف؟
 
-ملاحظة أداء مهمة (خطط استضافة بذاكرة محدودة، مثل Render Free 512MB):
-كل الدوال هنا تُصغّر الصورة تلقائيًا إلى حد أقصى معقول قبل التحليل عبر
-_load_and_downscale — تحليل ELA/Noise لا يحتاج دقة الصورة الأصلية الكاملة
-ليعطي إشارة موثوقة، وتصغيرها يقلل استهلاك الذاكرة بعشرات المرات لصور عالية الدقة.
+هذا لا يزال heuristic (قواعد مصمَّمة يدويًا، مو نموذج مدرَّب على بيانات)
+وما زال يحتاج معايرة على مجموعة اختبار أوسع بكثير قبل الاعتماد عليه
+بمنتج مدفوع — لكنه أصح علميًا من مقارنة كل مربع بمتوسط الصورة كاملة.
 """
 import io
 import numpy as np
 import cv2
 from PIL import Image
+from scipy import ndimage
 from typing import Any
 
-MAX_DIMENSION = 1600  # أقصى بُعد (طول أو عرض) بالبكسل قبل التحليل الفني
+MAX_DIMENSION = 1600
 
 
 def _load_and_downscale(file_path: str) -> Image.Image:
-    """يفتح الصورة ويصغّرها إن لزم — يمنع استهلاك ذاكرة زائد على صور عالية الدقة."""
     img = Image.open(file_path).convert("RGB")
     if max(img.size) > MAX_DIMENSION:
         ratio = MAX_DIMENSION / max(img.size)
         new_size = (int(img.width * ratio), int(img.height * ratio))
         img = img.resize(new_size, Image.LANCZOS)
     return img
+
+
+def _block_grid(arr_2d: np.ndarray, block_size: int) -> tuple[np.ndarray, int, int]:
+    h, w = arr_2d.shape
+    rows = h // block_size
+    cols = w // block_size
+    grid = np.zeros((rows, cols))
+    for r in range(rows):
+        for c in range(cols):
+            block = arr_2d[r * block_size:(r + 1) * block_size, c * block_size:(c + 1) * block_size]
+            grid[r, c] = np.mean(block)
+    return grid, rows, cols
+
+
+def _largest_interior_cluster(outlier_mask: np.ndarray) -> dict[str, Any]:
+    if outlier_mask.sum() == 0:
+        return {"found": False, "size_ratio": 0.0, "touches_border": True}
+
+    labeled, num_features = ndimage.label(outlier_mask)
+    if num_features == 0:
+        return {"found": False, "size_ratio": 0.0, "touches_border": True}
+
+    sizes = ndimage.sum(outlier_mask, labeled, range(1, num_features + 1))
+    largest_label = np.argmax(sizes) + 1
+    largest_size = sizes[np.argmax(sizes)]
+    total_blocks = outlier_mask.size
+    size_ratio = float(largest_size / total_blocks)
+
+    component_mask = labeled == largest_label
+    rows_with, cols_with = np.where(component_mask)
+    h, w = outlier_mask.shape
+    touches_border = (
+        rows_with.min() == 0 or rows_with.max() == h - 1 or
+        cols_with.min() == 0 or cols_with.max() == w - 1
+    )
+
+    return {
+        "found": True,
+        "size_ratio": round(size_ratio, 4),
+        "touches_border": bool(touches_border),
+        "cluster_block_count": int(largest_size),
+    }
 
 
 def error_level_analysis(file_path: str, quality: int = 90) -> dict[str, Any]:
@@ -63,29 +107,26 @@ def error_level_analysis(file_path: str, quality: int = 90) -> dict[str, Any]:
         ela_gray = cv2.cvtColor(diff, cv2.COLOR_RGB2GRAY)
 
         mean_error = float(np.mean(ela_gray))
-        max_error = float(np.max(ela_gray))
         std_error = float(np.std(ela_gray))
 
-        h, w = ela_gray.shape
-        block_size = max(16, min(h, w) // 8)
-        block_means = []
-        for y in range(0, h - block_size, block_size):
-            for x in range(0, w - block_size, block_size):
-                block = ela_gray[y:y + block_size, x:x + block_size]
-                block_means.append(float(np.mean(block)))
+        block_size = max(16, min(ela_gray.shape) // 12)
+        grid, rows, cols = _block_grid(ela_gray, block_size)
 
-        if block_means:
-            block_arr = np.array(block_means)
-            outlier_ratio = float(np.mean(block_arr > (np.mean(block_arr) + 2 * np.std(block_arr) + 1e-6)))
-        else:
-            outlier_ratio = 0.0
+        if grid.size < 9:
+            result.update({"available": True, "mean_error_level": round(mean_error, 3),
+                            "std_error_level": round(std_error, 3), "cluster": {"found": False}})
+            return result
+
+        threshold = np.mean(grid) + 2 * np.std(grid) + 1e-6
+        outlier_mask = grid > threshold
+        cluster = _largest_interior_cluster(outlier_mask)
 
         result.update({
             "available": True,
             "mean_error_level": round(mean_error, 3),
-            "max_error_level": round(max_error, 3),
             "std_error_level": round(std_error, 3),
-            "block_outlier_ratio": round(outlier_ratio, 4),
+            "grid_shape": [rows, cols],
+            "cluster": cluster,
         })
     except Exception as e:
         result["error"] = f"تعذّر تنفيذ Error Level Analysis: {e}"
@@ -109,31 +150,33 @@ def noise_consistency_analysis(file_path: str) -> dict[str, Any]:
         blurred = cv2.GaussianBlur(img, (5, 5), 0)
         noise_residual = cv2.absdiff(img, blurred)
 
-        h, w = noise_residual.shape
-        block_size = max(16, min(h, w) // 8)
-        block_variances = []
-        for y in range(0, h - block_size, block_size):
-            for x in range(0, w - block_size, block_size):
-                block = noise_residual[y:y + block_size, x:x + block_size]
-                block_variances.append(float(np.var(block)))
+        block_size = max(16, min(noise_residual.shape) // 12)
 
-        if not block_variances:
-            result["error"] = "الصورة صغيرة جدًا لتقسيمها إلى مناطق تحليل"
+        h, w = noise_residual.shape
+        rows, cols = h // block_size, w // block_size
+        var_grid = np.zeros((rows, cols))
+        for r in range(rows):
+            for c in range(cols):
+                block = noise_residual[r * block_size:(r + 1) * block_size, c * block_size:(c + 1) * block_size]
+                var_grid[r, c] = np.var(block)
+
+        if var_grid.size < 9:
+            result.update({"available": True, "cluster": {"found": False}})
             return result
 
-        variances = np.array(block_variances)
-        mean_var = float(np.mean(variances))
-        std_var = float(np.std(variances))
-        cv_ratio = float(std_var / mean_var) if mean_var > 1e-6 else 0.0
+        mean_var = float(np.mean(var_grid))
+        median_var = float(np.median(var_grid))
+        low_threshold = max(median_var * 0.12, 1.0) if mean_var > 3.0 else 0
 
-        low_variance_threshold = max(mean_var * 0.15, 1.0)
-        flat_block_ratio = float(np.mean(variances < low_variance_threshold)) if mean_var > 3.0 else 0.0
+        flat_mask = var_grid < low_threshold
+        cluster = _largest_interior_cluster(flat_mask)
 
         result.update({
             "available": True,
             "mean_noise_variance": round(mean_var, 4),
-            "noise_variation_coefficient": round(cv_ratio, 4),
-            "flat_region_ratio": round(flat_block_ratio, 4),
+            "median_noise_variance": round(median_var, 4),
+            "grid_shape": [rows, cols],
+            "cluster": cluster,
         })
     except Exception as e:
         result["error"] = f"تعذّر تحليل نمط الضوضاء: {e}"
@@ -142,28 +185,35 @@ def noise_consistency_analysis(file_path: str) -> dict[str, Any]:
 
 
 def assess_forensic_signals(ela: dict[str, Any], noise: dict[str, Any]) -> dict[str, Any]:
-    """
-    يحوّل القياسات الرقمية الخام إلى تصنيف Low/Moderate/High مع تفسير واضح.
-    العتبات هنا مبدئية (heuristic) — تحتاج معايرة لاحقًا على بيانات حقيقية متنوعة،
-    وهذا مذكور بوضوح في الإخراج نفسه حتى لا نمنح ثقة زائفة في الأرقام.
-    """
     flags: list[str] = []
-    signal = "low"
+    matches: list[str] = []
 
-    if ela.get("available"):
-        if ela["block_outlier_ratio"] > 0.08:
-            flags.append(f"نسبة {round(ela['block_outlier_ratio']*100,1)}% من مناطق الصورة تُظهر مستوى خطأ ضغط شاذًا عن محيطها — قد يشير لتعديل موضعي (لصق/طمس)")
-            signal = "moderate"
+    MIN_CLUSTER_RATIO = 0.008
+    MAX_CLUSTER_RATIO = 0.35
 
-    if noise.get("available"):
-        if noise.get("flat_region_ratio", 0) > 0.10:
-            flags.append(f"نسبة {round(noise['flat_region_ratio']*100,1)}% من مناطق الصورة ملساء بشكل غير طبيعي مقارنة ببقية الصورة — إشارة شائعة على لصق منطقة من مصدر آخر أو محتوى مولّد جزئيًا")
-            signal = "high"
-        elif noise["noise_variation_coefficient"] > 0.10:
-            flags.append("تفاوت ملحوظ في نمط الضوضاء بين مناطق الصورة — قد يشير لدمج مصادر متعددة أو غياب نمط ضوضاء حساس كاميرا طبيعي")
-            signal = "moderate" if signal == "low" else signal
+    for name, data in [("ELA", ela), ("نمط الضوضاء", noise)]:
+        cluster = data.get("cluster", {})
+        if not cluster.get("found"):
+            continue
+        ratio = cluster.get("size_ratio", 0)
+        touches_border = cluster.get("touches_border", True)
+
+        if MIN_CLUSTER_RATIO <= ratio <= MAX_CLUSTER_RATIO and not touches_border:
+            matches.append(name)
+            flags.append(
+                f"({name}) وُجدت بقعة داخلية متجمّعة (~{round(ratio*100,1)}% من مساحة الصورة) "
+                "بخصائص مختلفة عن محيطها المباشر ولا تلامس حواف الصورة — "
+                "نمط يستدعي مراجعة يدوية لاحتمال لصق/تركيب موضعي"
+            )
+
+    if len(matches) >= 2:
+        signal = "high"
+    elif len(matches) == 1:
+        signal = "moderate"
+    else:
+        signal = "low"
 
     if not flags:
-        flags.append("لا توجد إشارات forensic ملحوظة في هذا الفحص الأولي")
+        flags.append("لا توجد بقعة متجمّعة مشبوهة داخل الصورة في هذا الفحص الأولي")
 
     return {"signal_level": signal, "flags": flags}

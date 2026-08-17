@@ -62,7 +62,7 @@ def analyze_image(file_path: str) -> EvidenceReport:
             "error_level_analysis": ela,
             "noise_consistency": noise,
             "flags": forensic_assessment["flags"],
-            "note": "عتبات التصنيف مبدئية وتحتاج معايرة على بيانات أوسع — هذه إشارات وليست إثباتًا.",
+            "note": "يعتمد الآن على التجمّع المكاني للبقع المشبوهة (لا نسبة عامة) لتقليل false positives على صور تحتوي أكثر من نسيج طبيعي. ما زال heuristic يحتاج معايرة.",
         },
     ))
 
