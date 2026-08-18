@@ -1,11 +1,11 @@
 """
 يُنفّذ Pipeline الصورة الكامل:
-Hash -> Metadata/EXIF -> Forensics (محلي) -> AI Detection (Hive API) -> Evidence Report
+Hash -> Metadata/EXIF -> Forensics (محلي) -> AI Detection (Sightengine) -> Evidence Report
 """
 from app.services.hashing import compute_sha256
 from app.services.metadata_image import extract_image_metadata, assess_metadata_consistency
 from app.services.forensics_image import error_level_analysis, noise_consistency_analysis, assess_forensic_signals
-from app.services.hive_client import check_ai_generated
+from app.services.sightengine_client import check_ai_generated
 from app.services.evidence_engine import EvidenceReport, EvidenceItem, EvidenceLevel
 
 
@@ -63,10 +63,10 @@ async def analyze_image(file_path: str) -> EvidenceReport:
         },
     ))
 
-    hive_result = await check_ai_generated(file_path)
+    ai_result = await check_ai_generated(file_path)
 
-    if hive_result.get("available"):
-        ai_score = hive_result["ai_generated_score"]
+    if ai_result.get("available"):
+        ai_score = ai_result["ai_generated_score"]
         if ai_score >= 0.65:
             ai_level = EvidenceLevel.CONFLICT
             ai_summary = f"احتمال توليد بالذكاء الاصطناعي مرتفع ({round(ai_score*100,1)}%)."
@@ -77,23 +77,23 @@ async def analyze_image(file_path: str) -> EvidenceReport:
             ai_level = EvidenceLevel.GOOD
             ai_summary = f"لا توجد إشارات قوية على التوليد بالذكاء الاصطناعي ({round(ai_score*100,1)}%)."
 
-        if hive_result.get("likely_source"):
-            ai_summary += f" المصدر المرجَّح: {hive_result['likely_source']}."
+        if ai_result.get("likely_source"):
+            ai_summary += f" المصدر المرجَّح: {ai_result['likely_source']}."
 
         items.append(EvidenceItem(
             key="ai_analysis",
             label_ar="تحليل الذكاء الاصطناعي (AI Analysis)",
             level=ai_level,
             summary_ar=ai_summary,
-            details=hive_result,
+            details=ai_result,
         ))
     else:
         items.append(EvidenceItem(
             key="ai_analysis",
             label_ar="تحليل الذكاء الاصطناعي (AI Analysis)",
             level=EvidenceLevel.NA,
-            summary_ar="تعذّر تنفيذ الفحص عبر Hive API في هذه اللحظة.",
-            details=hive_result,
+            summary_ar="تعذّر تنفيذ الفحص عبر Sightengine في هذه اللحظة.",
+            details=ai_result,
         ))
 
     items.append(EvidenceItem(
