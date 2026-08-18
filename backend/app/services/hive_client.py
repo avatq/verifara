@@ -1,12 +1,23 @@
 """
-عميل Hive Moderation API — كشف حقيقي للصور المولّدة بالذكاء الاصطناعي.
-المرجع الرسمي: https://docs.thehive.ai/docs/ai-image-and-video-detection
+عميل Hive — كشف الصور المولّدة بالذكاء الاصطناعي عبر Vision Language Model (V3 self-serve).
+ملاحظة: النموذج المتخصص 96-98% يتطلب مشروع V2 مؤسسي (تواصل مبيعات) — غير متاح ذاتيًا.
+البديل هنا: Hive VLM عام موجَّه بطلب تصنيف واضح.
 """
 import os
+import json
 import httpx
 from typing import Any
 
-HIVE_ENDPOINT = "https://api.thehive.ai/api/v2/task/sync"
+HIVE_VLM_ENDPOINT = "https://api.thehive.ai/api/v3/chat/completions"
+
+CLASSIFICATION_PROMPT = (
+    "You are an expert image forensics analyst. Examine this image carefully for signs "
+    "of AI generation (e.g. unnatural textures, impossible lighting, artifacts typical of "
+    "diffusion models, unnatural symmetry, warped details in hands/text/backgrounds). "
+    "Respond with ONLY a JSON object, no other text, in exactly this format: "
+    '{"ai_generated": true or false, "confidence": a number from 0.0 to 1.0, '
+    '"reasoning": "one short sentence explaining the key visual evidence"}'
+)
 
 
 async def check_ai_generated(file_path: str) -> dict[str, Any]:
@@ -18,49 +29,64 @@ async def check_ai_generated(file_path: str) -> dict[str, Any]:
         return result
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            with open(file_path, "rb") as f:
-                response = await client.post(
-                    HIVE_ENDPOINT,
-                    headers={"authorization": f"Token {api_key}"},
-                    files={"media": f},
-                )
+        import base64
+        with open(file_path, "rb") as f:
+            image_bytes = f.read()
+        ext = file_path.rsplit(".", 1)[-1].lower()
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+        b64_data = base64.b64encode(image_bytes).decode()
+        data_url = f"data:{mime};base64,{b64_data}"
+
+        payload = {
+            "model": "hive/vision-language-model",
+            "max_tokens": 200,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": CLASSIFICATION_PROMPT},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }],
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                HIVE_VLM_ENDPOINT,
+                headers={
+                    "authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
 
         if response.status_code != 200:
-            error_msg = f"Hive API رجع status {response.status_code}: {response.text[:300]}"
+            error_msg = f"Hive VLM رجع status {response.status_code}: {response.text[:300]}"
             print(f"[HIVE ERROR] {error_msg}")
             result["error"] = error_msg
             return result
 
         data = response.json()
-        status_list = data.get("status", [])
-        if not status_list or status_list[0].get("status", {}).get("code") != "0":
-            print(f"[HIVE ERROR] unexpected response body: {str(data)[:300]}")
-            result["error"] = "Hive API لم يرجع نتيجة ناجحة"
-            return result
+        content = data["choices"][0]["message"]["content"].strip()
 
-        output = status_list[0]["response"]["output"][0]["classes"]
-        classes = {c["class"]: c["score"] for c in output}
+        if content.startswith("```"):
+            content = content.strip("`").removeprefix("json").strip()
 
-        ai_score = classes.get("ai_generated", 0.0)
-        not_ai_score = classes.get("not_ai_generated", 0.0)
+        parsed = json.loads(content)
 
-        source_classes = {
-            k: v for k, v in classes.items()
-            if k not in ("ai_generated", "not_ai_generated", "none", "inconclusive", "inconclusive_video")
-        }
-        top_source = max(source_classes.items(), key=lambda x: x[1]) if source_classes else None
+        ai_generated = bool(parsed.get("ai_generated", False))
+        confidence = float(parsed.get("confidence", 0.5))
+        reasoning = parsed.get("reasoning", "")
 
         result.update({
             "available": True,
-            "ai_generated_score": round(ai_score, 4),
-            "not_ai_generated_score": round(not_ai_score, 4),
-            "likely_source": top_source[0] if top_source and top_source[1] > 0.3 else None,
-            "likely_source_score": round(top_source[1], 4) if top_source and top_source[1] > 0.3 else None,
+            "ai_generated_score": confidence if ai_generated else round(1 - confidence, 4),
+            "not_ai_generated_score": round(1 - confidence, 4) if ai_generated else confidence,
+            "reasoning": reasoning,
+            "model_type": "hive_vlm_general_purpose",
         })
 
     except Exception as e:
         print(f"[HIVE ERROR] exception: {type(e).__name__}: {e}")
-        result["error"] = f"تعذّر الاتصال بـ Hive API: {e}"
+        result["error"] = f"تعذّر الاتصال بـ Hive VLM: {e}"
 
     return result
