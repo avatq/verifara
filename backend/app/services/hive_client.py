@@ -1,8 +1,6 @@
 """
 عميل Hive Moderation API — كشف حقيقي للصور المولّدة بالذكاء الاصطناعي.
 المرجع الرسمي: https://docs.thehive.ai/docs/ai-image-and-video-detection
-التسعير: ~$0.001 لكل صورة (حسب الاستخدام الفعلي، بدون اشتراك ثابت).
-أمان مهم: مفتاح الـ API يُقرأ فقط من متغير بيئة HIVE_API_KEY.
 """
 import os
 import httpx
@@ -29,12 +27,15 @@ async def check_ai_generated(file_path: str) -> dict[str, Any]:
                 )
 
         if response.status_code != 200:
-            result["error"] = f"Hive API رجع status {response.status_code}: {response.text[:200]}"
+            error_msg = f"Hive API رجع status {response.status_code}: {response.text[:300]}"
+            print(f"[HIVE ERROR] {error_msg}")
+            result["error"] = error_msg
             return result
 
         data = response.json()
         status_list = data.get("status", [])
         if not status_list or status_list[0].get("status", {}).get("code") != "0":
+            print(f"[HIVE ERROR] unexpected response body: {str(data)[:300]}")
             result["error"] = "Hive API لم يرجع نتيجة ناجحة"
             return result
 
@@ -59,6 +60,7 @@ async def check_ai_generated(file_path: str) -> dict[str, Any]:
         })
 
     except Exception as e:
+        print(f"[HIVE ERROR] exception: {type(e).__name__}: {e}")
         result["error"] = f"تعذّر الاتصال بـ Hive API: {e}"
 
     return result
