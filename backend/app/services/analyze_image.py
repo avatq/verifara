@@ -1,10 +1,11 @@
 """
 يُنفّذ Pipeline الصورة الكامل:
-Hash -> Metadata/EXIF -> Forensics (محلي) -> AI Detection (Sightengine) -> Evidence Report
+Hash -> Metadata/EXIF -> Forensics (محلي) -> C2PA -> AI Detection (Sightengine) -> Evidence Report
 """
 from app.services.hashing import compute_sha256
 from app.services.metadata_image import extract_image_metadata, assess_metadata_consistency
 from app.services.forensics_image import error_level_analysis, noise_consistency_analysis, assess_forensic_signals
+from app.services.c2pa_check import check_c2pa
 from app.services.sightengine_client import check_ai_generated
 from app.services.evidence_engine import EvidenceReport, EvidenceItem, EvidenceLevel
 
@@ -97,12 +98,26 @@ async def analyze_image(file_path: str) -> EvidenceReport:
             details=ai_result,
         ))
 
+    c2pa_result = check_c2pa(file_path)
+
+    if c2pa_result.get("manifest_found"):
+        level = EvidenceLevel.GOOD
+        summary = "تم العثور على بيانات C2PA موقّعة رقميًا."
+        if c2pa_result.get("issuer"):
+            summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
+    elif c2pa_result.get("available"):
+        level = EvidenceLevel.NA
+        summary = "لا توجد بيانات C2PA بالملف — شائع جدًا (المعيار غير منتشر بعد)، ليس دليل تلاعب."
+    else:
+        level = EvidenceLevel.NA
+        summary = "تعذّر تنفيذ فحص C2PA في هذه اللحظة."
+
     items.append(EvidenceItem(
         key="provenance",
         label_ar="مصدر المحتوى (C2PA / Content Credentials)",
-        level=EvidenceLevel.NA,
-        summary_ar="فحص C2PA لم يُفعَّل بعد في هذه المرحلة من التطوير.",
-        details={"status": "not_implemented_yet"},
+        level=level,
+        summary_ar=summary,
+        details=c2pa_result,
     ))
 
     report = EvidenceReport(file_hash=file_hash, file_type="image", items=items)
