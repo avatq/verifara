@@ -100,11 +100,33 @@ async def analyze_image(file_path: str) -> EvidenceReport:
 
     c2pa_result = check_c2pa(file_path)
 
+    AI_ISSUER_MARKERS = [
+        "google", "gemini", "imagen", "openai", "dall-e", "dalle", "sora",
+        "adobe firefly", "midjourney", "stability", "meta ai", "bing image creator",
+        "leonardo.ai", "runway",
+    ]
+
     if c2pa_result.get("manifest_found"):
-        level = EvidenceLevel.GOOD
-        summary = "تم العثور على بيانات C2PA موقّعة رقميًا."
-        if c2pa_result.get("issuer"):
-            summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
+        issuer = (c2pa_result.get("issuer") or "").lower()
+        generator = (c2pa_result.get("claim_generator") or "").lower()
+        combined = f"{issuer} {generator}"
+
+        indicates_ai_origin = any(marker in combined for marker in AI_ISSUER_MARKERS)
+
+        if indicates_ai_origin:
+            level = EvidenceLevel.CONFLICT
+            summary = (
+                "تم العثور على بيانات C2PA موقّعة رقميًا، وهي تشير لأداة ذكاء اصطناعي — "
+                "هذا يوثّق أصل الملف كمحتوى مولَّد بـAI، لا يُثبت الأصالة."
+            )
+            if c2pa_result.get("issuer"):
+                summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
+        else:
+            level = EvidenceLevel.GOOD
+            summary = "تم العثور على بيانات C2PA موقّعة رقميًا — لا تشير لأداة AI معروفة."
+            if c2pa_result.get("issuer"):
+                summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
+        summary += " ملاحظة: وجود C2PA يوثّق السجل التاريخي فقط، ولا يُثبت وحده صحة أو زيف المحتوى."
     elif c2pa_result.get("available"):
         level = EvidenceLevel.NA
         summary = "لا توجد بيانات C2PA بالملف — شائع جدًا (المعيار غير منتشر بعد)، ليس دليل تلاعب."
