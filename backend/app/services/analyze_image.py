@@ -86,6 +86,7 @@ async def analyze_image(file_path: str) -> EvidenceReport:
             level=ai_level,
             summary_ar=ai_summary,
             details=ai_result,
+            score_percent=round(ai_score * 100, 1),
         ))
     else:
         items.append(EvidenceItem(

@@ -1,7 +1,5 @@
-// يطابق تمامًا EvidenceReport.to_dict() من backend/app/services/evidence_engine.py
-// أي تغيير هنا يجب أن يقابله تغيير مطابق في الـ backend والعكس صحيح.
-
 export type EvidenceLevel = "good" | "minor" | "low" | "na" | "conflict";
+export type Verdict = "not_ai" | "ai_generated" | "inconclusive";
 
 export interface EvidenceItem {
   key: string;
@@ -9,6 +7,7 @@ export interface EvidenceItem {
   level: EvidenceLevel;
   summary: string;
   details: Record<string, unknown>;
+  score_percent: number | null;
 }
 
 export interface EvidenceReport {
@@ -16,6 +15,9 @@ export interface EvidenceReport {
   file_type: "image" | "document" | "video" | "audio";
   overall_assessment: string;
   evidence_confidence: number;
+  verdict: Verdict;
+  verdict_label: string;
+  confidence_label: string;
   items: EvidenceItem[];
 }
 
