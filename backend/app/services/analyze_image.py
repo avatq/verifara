@@ -107,26 +107,31 @@ async def analyze_image(file_path: str) -> EvidenceReport:
     ]
 
     if c2pa_result.get("manifest_found"):
-        issuer = (c2pa_result.get("issuer") or "").lower()
-        generator = (c2pa_result.get("claim_generator") or "").lower()
-        combined = f"{issuer} {generator}"
-
-        indicates_ai_origin = any(marker in combined for marker in AI_ISSUER_MARKERS)
-
-        if indicates_ai_origin:
+        if c2pa_result.get("ai_indicated_by_source_type"):
             level = EvidenceLevel.CONFLICT
             summary = (
-                "تم العثور على بيانات C2PA موقّعة رقميًا، وهي تشير لأداة ذكاء اصطناعي — "
-                "هذا يوثّق أصل الملف كمحتوى مولَّد بـAI، لا يُثبت الأصالة."
+                f"بيانات C2PA الرسمية تُصرّح بوضوح: {c2pa_result.get('ai_source_type_label')} "
+                "(حقل digitalSourceType المعياري) — إفصاح صريح من الأداة نفسها."
             )
-            if c2pa_result.get("issuer"):
-                summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
         else:
-            level = EvidenceLevel.GOOD
-            summary = "تم العثور على بيانات C2PA موقّعة رقميًا — لا تشير لأداة AI معروفة."
-            if c2pa_result.get("issuer"):
-                summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
-        summary += " ملاحظة: وجود C2PA يوثّق السجل التاريخي فقط، ولا يُثبت وحده صحة أو زيف المحتوى."
+            issuer = (c2pa_result.get("issuer") or "").lower()
+            generator = (c2pa_result.get("claim_generator") or "").lower()
+            combined = f"{issuer} {generator}"
+            indicates_ai_by_name = any(marker in combined for marker in AI_ISSUER_MARKERS)
+
+            if indicates_ai_by_name:
+                level = EvidenceLevel.MINOR
+                summary = (
+                    "بيانات C2PA لا تحتوي إفصاح AI رسمي (digitalSourceType)، "
+                    "لكن اسم الجهة/الأداة يطابق مولّد AI معروف — إشارة أضعف تستحق مراجعة."
+                )
+            else:
+                level = EvidenceLevel.GOOD
+                summary = "تم العثور على بيانات C2PA موقّعة رقميًا — لا إشارة AI رسمية أو باسم الأداة."
+
+        if c2pa_result.get("issuer"):
+            summary += f" الجهة المُصدرة: {c2pa_result['issuer']}."
+        summary += " ملاحظة: C2PA يوثّق السجل التاريخي، وغيابه لا يثبت التلاعب."
     elif c2pa_result.get("available"):
         level = EvidenceLevel.NA
         summary = "لا توجد بيانات C2PA بالملف — شائع جدًا (المعيار غير منتشر بعد)، ليس دليل تلاعب."

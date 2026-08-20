@@ -1,9 +1,14 @@
 """
-فحص C2PA / Content Credentials — قراءة مباشرة، بدون API مدفوع.
-غياب C2PA يعني "لا معلومة"، مو "دليل تلاعب" — المعيار غير منتشر بعد.
+فحص C2PA / Content Credentials — يعتمد على digitalSourceType الرسمي.
 """
 import c2pa
+import json
 from typing import Any
+
+AI_SOURCE_TYPES = {
+    "trainedAlgorithmicMedia": "مولَّد بالكامل بالذكاء الاصطناعي",
+    "compositeWithTrainedAlgorithmicMedia": "محتوى حقيقي معدَّل بأدوات ذكاء اصطناعي",
+}
 
 
 def check_c2pa(file_path: str) -> dict[str, Any]:
@@ -13,7 +18,6 @@ def check_c2pa(file_path: str) -> dict[str, Any]:
         with c2pa.Reader(file_path) as reader:
             manifest_json = reader.json()
 
-        import json
         data = json.loads(manifest_json)
         active_manifest = data.get("active_manifest")
         manifests = data.get("manifests", {})
@@ -26,23 +30,36 @@ def check_c2pa(file_path: str) -> dict[str, Any]:
         claim_generator = manifest.get("claim_generator", None)
         title = manifest.get("title", None)
 
-        actions = []
+        actions_data = []
+        digital_source_types: list[str] = []
         for assertion in manifest.get("assertions", []):
-            if assertion.get("label") == "c2pa.actions":
-                actions = [a.get("action") for a in assertion.get("data", {}).get("actions", [])]
+            if assertion.get("label") in ("c2pa.actions", "c2pa.actions.v2"):
+                for action in assertion.get("data", {}).get("actions", []):
+                    actions_data.append(action.get("action"))
+                    dst = action.get("digitalSourceType", "")
+                    if dst:
+                        short_type = dst.rstrip("/").split("/")[-1]
+                        digital_source_types.append(short_type)
+
+        ai_matches = [t for t in digital_source_types if t in AI_SOURCE_TYPES]
 
         signature_info = manifest.get("signature_info", {})
         issuer = signature_info.get("issuer", None)
-        cert_serial = signature_info.get("cert_serial_number", None)
 
         result.update({
             "available": True,
             "manifest_found": True,
             "claim_generator": claim_generator,
             "title": title,
-            "actions": actions,
+            "actions": actions_data,
+            "digital_source_types": digital_source_types,
+            "ai_indicated_by_source_type": bool(ai_matches),
+            "ai_source_type_label": AI_SOURCE_TYPES.get(ai_matches[0]) if ai_matches else None,
             "issuer": issuer,
-            "has_valid_signature": bool(issuer and cert_serial),
+            "honesty_note": (
+                "digitalSourceType حقل رسمي بالمعيار لكن غير إلزامي — "
+                "وجوده دليل قوي على أصل AI، لكن غيابه لا ينفي احتمال AI بالضرورة."
+            ),
         })
 
     except c2pa.C2paError as e:
