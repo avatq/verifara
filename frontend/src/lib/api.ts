@@ -1,6 +1,7 @@
 import { EvidenceReport } from "@/types/evidence";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const REQUEST_TIMEOUT_MS = 90_000;
 
 export class ApiRequestError extends Error {
   constructor(public status: number, message: string) {
@@ -12,20 +13,35 @@ async function postFile(endpoint: string, file: File): Promise<EvidenceReport> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    method: "POST",
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: "خطأ غير متوقع من الخادم" }));
-    throw new ApiRequestError(res.status, body.detail ?? "فشل التحليل");
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: "خطأ غير متوقع من الخادم" }));
+      throw new ApiRequestError(res.status, body.detail ?? "فشل التحليل");
+    }
+
+    return res.json();
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new ApiRequestError(
+        408,
+        "استغرق الخادم وقتًا أطول من المتوقع (قد يكون بدأ التشغيل من جديد بعد فترة خمول). جرّب مرة أخرى الآن."
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return res.json();
 }
 
-// نحدد نوع التحليل بناءً على امتداد الملف — يطابق ALLOWED_* في backend/app/core/config.py
 const IMAGE_EXT = [".jpg", ".jpeg", ".png", ".webp"];
 const DOC_EXT = [".pdf", ".docx", ".txt", ".csv"];
 

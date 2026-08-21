@@ -1,18 +1,30 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { analyzeFile, ApiRequestError } from "@/lib/api";
 import { EvidenceReport } from "@/types/evidence";
 import { EvidenceReportView } from "./EvidenceReportView";
 
 type Status = "idle" | "analyzing" | "done" | "error";
 
+const SLOW_SERVER_HINT_SECONDS = 8;
+
 export function UploadPanel() {
   const [status, setStatus] = useState<Status>("idle");
   const [report, setReport] = useState<EvidenceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (status !== "analyzing") {
+      setElapsedSeconds(0);
+      return;
+    }
+    const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [status]);
 
   const runAnalysis = useCallback(async (file: File) => {
     setStatus("analyzing");
@@ -74,6 +86,11 @@ export function UploadPanel() {
         <div className="flex flex-col items-center gap-3 py-6">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent-violet border-t-transparent" />
           <p className="text-sm text-slate-400">جارٍ تحليل الملف — استخراج البيانات وبناء تقرير الأدلة…</p>
+          {elapsedSeconds >= SLOW_SERVER_HINT_SECONDS && (
+            <p className="text-xs text-slate-500 max-w-xs">
+              الخادم قد يكون بدأ التشغيل من جديد بعد فترة خمول — هذا طبيعي ويستغرق حتى دقيقة أحيانًا. الرجاء الانتظار ({elapsedSeconds}s)…
+            </p>
+          )}
         </div>
       ) : (
         <>
@@ -100,7 +117,15 @@ export function UploadPanel() {
       )}
 
       {status === "error" && error && (
-        <p className="mt-4 text-sm text-status-conflict" role="alert">{error}</p>
+        <div className="mt-4 space-y-2">
+          <p className="text-sm text-status-conflict" role="alert">{error}</p>
+          <button
+            onClick={() => inputRef.current?.click()}
+            className="text-xs text-accent-violet hover:underline"
+          >
+            جرّب مرة أخرى
+          </button>
+        </div>
       )}
     </div>
   );
