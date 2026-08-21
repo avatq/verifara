@@ -1,6 +1,7 @@
 import { EvidenceReport } from "@/types/evidence";
 import { EvidenceBadge } from "./EvidenceBadge";
 import { VerdictCard } from "./VerdictCard";
+import { ReasonChecklist, FindingsAndLimitations, Recommendations } from "./ReportInsights";
 
 export function EvidenceReportView({ report }: { report: EvidenceReport }) {
   return (
@@ -14,6 +15,8 @@ export function EvidenceReportView({ report }: { report: EvidenceReport }) {
           <span>التقييم التفصيلي: {report.overall_assessment}</span>
         </div>
       </div>
+
+      <ReasonChecklist report={report} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         {report.items.map((item) => (
@@ -33,6 +36,10 @@ export function EvidenceReportView({ report }: { report: EvidenceReport }) {
           </div>
         ))}
       </div>
+
+      <FindingsAndLimitations report={report} />
+
+      <Recommendations report={report} />
     </div>
   );
 }
