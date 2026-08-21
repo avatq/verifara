@@ -28,6 +28,19 @@ const VERDICT_CONFIG = {
 } as const;
 
 export function VerdictCard({ report }: { report: EvidenceReport }) {
+  if (report.file_type !== "image") {
+    return (
+      <div className="rounded-2xl border-2 border-base-700 bg-base-900 p-6">
+        <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">التقييم العام</p>
+        <h2 className="font-display text-2xl font-extrabold text-slate-100">{report.overall_assessment}</h2>
+        <div className="mt-4 flex items-start gap-2 rounded-lg bg-base-950/40 p-3 text-xs text-slate-400">
+          <span className="mt-0.5">ⓘ</span>
+          <p>تحليل "AI Analysis" المتخصص متاح حاليًا للصور فقط. هذا التقييم مبني على بيانات المستند وبنيته وأسلوب الكتابة.</p>
+        </div>
+      </div>
+    );
+  }
+
   const cfg = VERDICT_CONFIG[report.verdict];
 
   return (
