@@ -2,6 +2,7 @@ import { EvidenceReport } from "@/types/evidence";
 import { EvidenceBadge } from "./EvidenceBadge";
 import { VerdictCard } from "./VerdictCard";
 import { ReasonChecklist, FindingsAndLimitations, Recommendations } from "./ReportInsights";
+import { EvidenceDetailsPanel } from "./EvidenceDetailsPanel";
 
 export function EvidenceReportView({ report }: { report: EvidenceReport }) {
   return (
@@ -33,6 +34,7 @@ export function EvidenceReportView({ report }: { report: EvidenceReport }) {
               </div>
             </div>
             <p className="text-sm text-slate-400 leading-relaxed">{item.summary}</p>
+            <EvidenceDetailsPanel item={item} />
           </div>
         ))}
       </div>
