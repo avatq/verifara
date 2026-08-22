@@ -1,5 +1,6 @@
 export type EvidenceLevel = "good" | "minor" | "low" | "na" | "conflict";
 export type Verdict = "not_ai" | "ai_generated" | "inconclusive";
+export type Classification = "ai_generated" | "ai_assisted" | "camera_capture" | "unknown";
 
 export interface EvidenceItem {
   key: string;
@@ -18,6 +19,8 @@ export interface EvidenceReport {
   verdict: Verdict;
   verdict_label: string;
   confidence_label: string;
+  classification: Classification;
+  classification_label: string;
   items: EvidenceItem[];
 }
 

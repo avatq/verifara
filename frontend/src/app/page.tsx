@@ -20,6 +20,15 @@ export default function HomePage() {
           ارفع صورة أو مستند، وسنحلّل البيانات الوصفية والبنية التقنية لبناء تقرير أدلة شفاف — بدون أحكام قطعية على الحقيقة.
         </p>
 
+        <div className="mt-6 flex flex-wrap gap-2">
+          <span className="rounded-full border border-base-700 bg-base-900 px-3 py-1.5 text-xs text-slate-400">
+            🇪🇺 يدعم متطلبات الشفافية بموجب EU AI Act – Article 50
+          </span>
+          <span className="rounded-full border border-base-700 bg-base-900 px-3 py-1.5 text-xs text-slate-400">
+            مناسب لفرق المحتوى، وكالات الإعلان، والامتثال المؤسسي
+          </span>
+        </div>
+
         <div className="mt-10">
           <UploadPanel />
         </div>
